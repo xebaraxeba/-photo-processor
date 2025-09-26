@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processador de Fotos de Palestrantes</title>
+    <!-- Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Biblioteca SheetJS para ler arquivos .xlsx e .csv -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Biblioteca JSZip para criar arquivos .zip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Biblioteca face-api.js para detecção de rostos -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Ícones Lucide -->
+    <script src="https://unpkg.com/lucide-react@0.292.0/dist/lucide-react.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-input-label {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .file-input-label:hover {
+            opacity: 0.9;
+        }
+        .loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Estilo para garantir que o layout não quebre durante o carregamento dos ícones */
+        [data-lucide] {
+            display: inline-block;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Ferramenta de Corte de Fotos de Palestrantes</h1>
+            <p class="mt-2 text-gray-600">Envie sua planilha, baixe, corte e renomeie as fotos automaticamente.</p>
+        </header>
+
+        <main id="app">
+            <!-- Seção de Instruções -->
+            <div id="instructions" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-lg mb-6">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0">
+                        <svg class="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-lg font-semibold">Como usar:</h3>
+                        <ol class="list-decimal list-inside mt-2 space-y-1">
+                            <li>Prepare uma planilha (.xlsx ou .csv) com duas colunas: <strong>Nome do Palestrante</strong> (Coluna A) e <strong>Link da Foto no Google Drive</strong> (Coluna B).</li>
+                            <li><strong>Importante:</strong> Os links do Google Drive devem ser públicos ("Qualquer pessoa com o link").</li>
+                            <li>Use uma das opções abaixo: arraste o arquivo da planilha ou cole os dados diretamente.</li>
+                            <li>Clique em "Processar Imagens" e aguarde a mágica acontecer.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seção de Upload -->
+            <div id="upload-section" class="bg-white p-6 rounded-lg shadow-md mb-6">
+                 <div class="flex flex-col md:flex-row gap-4">
+                    <!-- Opção de Upload de Arquivo -->
+                    <div class="w-full md:w-1/2 border-2 border-dashed border-gray-300 rounded-lg p-6 text-center" id="drop-zone">
+                        <input type="file" id="file-input" class="hidden" accept=".xlsx, .csv">
+                        <label for="file-input" class="file-input-label flex flex-col items-center justify-center">
+                            <svg class="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-4-4V7a4 4 0 014-4h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V16a4 4 0 01-4 4H7z" /></svg>
+                            <span class="mt-2 text-sm font-medium text-gray-600">Arraste e solte o arquivo aqui</span>
+                            <span class="text-xs text-gray-500">ou</span>
+                            <span class="mt-1 text-sm font-bold text-blue-600">Clique para selecionar</span>
+                        </label>
+                        <p id="file-name" class="mt-2 text-sm text-gray-500"></p>
+                    </div>
+                     <!-- Opção de Colar Dados -->
+                    <div class="w-full md:w-1/2">
+                        <textarea id="paste-data" class="w-full h-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" rows="6" placeholder="Ou cole os dados aqui (ex:&#10;Nome Sobrenome, http://link-da-foto.com&#10;Outro Nome, http://link-da-foto-2.com)"></textarea>
+                    </div>
+                </div>
+                <div class="mt-6 text-center">
+                    <button id="process-btn" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-blue-700 transition transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:scale-100">
+                        Processar Imagens
+                    </button>
+                </div>
+            </div>
+
+            <!-- Seção de Status e Progresso -->
+            <div id="status-section" class="hidden text-center bg-white p-6 rounded-lg shadow-md mb-6">
+                <div class="flex items-center justify-center">
+                    <div class="loader h-8 w-8 rounded-full border-4 border-gray-200"></div>
+                    <p id="status-text" class="ml-4 text-lg font-medium text-gray-700">Aguardando...</p>
+                </div>
+                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-4">
+                    <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Seção de Resultados -->
+            <div id="results-section" class="hidden">
+                 <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">Resultados</h2>
+                    <button id="download-all-btn" class="bg-green-600 text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-green-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        Baixar Todas (.zip)
+                    </button>
+                </div>
+                <div id="results-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <!-- Cards de resultado serão inseridos aqui -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const app = {
+            // Elementos da UI
+            dropZone: document.getElementById('drop-zone'),
+            fileInput: document.getElementById('file-input'),
+            fileNameEl: document.getElementById('file-name'),
+            pasteDataEl: document.getElementById('paste-data'),
+            processBtn: document.getElementById('process-btn'),
+            statusSection: document.getElementById('status-section'),
+            statusText: document.getElementById('status-text'),
+            progressBar: document.getElementById('progress-bar'),
+            resultsSection: document.getElementById('results-section'),
+            resultsGrid: document.getElementById('results-grid'),
+            downloadAllBtn: document.getElementById('download-all-btn'),
+
+            // Estado da aplicação
+            isProcessing: false,
+            modelsLoaded: false,
+            processedImages: [],
+
+            init() {
+                this.setupEventListeners();
+                this.loadModels();
+            },
+
+            // Carrega os modelos de detecção facial
+            async loadModels() {
+                this.updateStatus('Carregando modelos de IA...');
+                this.processBtn.disabled = true;
+                try {
+                    await faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights');
+                    this.modelsLoaded = true;
+                    this.updateStatus('Modelos carregados. Pronto para começar!');
+                    this.processBtn.disabled = false;
+                } catch (error) {
+                    console.error('Erro ao carregar modelos da face-api:', error);
+                    this.updateStatus('Erro ao carregar modelos. Tente recarregar a página.', true);
+                }
+            },
+
+            // Configura os eventos da página
+            setupEventListeners() {
+                this.processBtn.addEventListener('click', () => this.startProcessing());
+                
+                // Eventos para arrastar e soltar arquivo
+                this.dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.dropZone.classList.add('border-blue-500', 'bg-blue-50');
+                });
+                this.dropZone.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    this.dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+                });
+                this.dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+                    if (e.dataTransfer.files.length) {
+                        this.fileInput.files = e.dataTransfer.files;
+                        this.fileNameEl.textContent = this.fileInput.files[0].name;
+                        this.pasteDataEl.value = ''; // Limpa a outra opção
+                    }
+                });
+
+                this.fileInput.addEventListener('change', () => {
+                     if (this.fileInput.files.length) {
+                        this.fileNameEl.textContent = this.fileInput.files[0].name;
+                        this.pasteDataEl.value = ''; // Limpa a outra opção
+                    }
+                });
+
+                this.downloadAllBtn.addEventListener('click', () => this.downloadAllAsZip());
+            },
+
+            // Inicia o processamento dos dados
+            async startProcessing() {
+                if (this.isProcessing) return;
+
+                this.isProcessing = true;
+                this.processBtn.disabled = true;
+                this.statusSection.classList.remove('hidden');
+                this.resultsSection.classList.add('hidden');
+                this.resultsGrid.innerHTML = '';
+                this.processedImages = [];
+
+                try {
+                    const data = await this.getData();
+                    if (!data || data.length === 0) {
+                        throw new Error('Nenhum dado encontrado. Verifique o arquivo ou o texto colado.');
+                    }
+
+                    for (let i = 0; i < data.length; i++) {
+                        const row = data[i];
+                        const name = row['Nome do Palestrante'] || row[Object.keys(row)[0]];
+                        const url = row['Link da Foto no Google Drive'] || row[Object.keys(row)[1]];
+
+                        if (name && url) {
+                            this.updateStatus(`Processando ${i + 1}/${data.length}: ${name}`);
+                            this.updateProgress((i + 1) / data.length * 100);
+                            await this.processImage(name, url);
+                        }
+                    }
+
+                    this.updateStatus('Processamento concluído!', false, true);
+                    this.resultsSection.classList.remove('hidden');
+
+                } catch (error) {
+                    console.error('Erro no processamento:', error);
+                    this.updateStatus(`Erro: ${error.message}`, true);
+                } finally {
+                    this.isProcessing = false;
+                    this.processBtn.disabled = false;
+                }
+            },
+
+            // Obtém os dados da planilha ou da área de texto
+            getData() {
+                return new Promise((resolve, reject) => {
+                    if (this.fileInput.files.length > 0) {
+                        const file = this.fileInput.files[0];
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const sheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[sheetName];
+                            const json = XLSX.utils.sheet_to_json(worksheet);
+                            resolve(json);
+                        };
+                        reader.onerror = (err) => reject(err);
+                        reader.readAsArrayBuffer(file);
+                    } else if (this.pasteDataEl.value.trim() !== '') {
+                        const text = this.pasteDataEl.value.trim();
+                        const lines = text.split('\n');
+                        const data = lines.map(line => {
+                            const parts = line.split(/[,;\t]/); // Suporta vírgula, ponto e vírgula ou tab
+                            return {
+                                'Nome do Palestrante': parts[0] ? parts[0].trim() : '',
+                                'Link da Foto no Google Drive': parts[1] ? parts[1].trim() : ''
+                            };
+                        }).filter(item => item['Nome do Palestrante'] && item['Link da Foto no Google Drive']);
+                        resolve(data);
+                    } else {
+                        reject(new Error('Nenhuma fonte de dados selecionada.'));
+                    }
+                });
+            },
+
+            // Processa uma única imagem: baixa, detecta rosto e corta
+            async processImage(name, url) {
+                const directUrl = this.getGoogleDriveDirectUrl(url);
+                if (!directUrl) {
+                     this.addResultCard(name, null, 'URL inválida do Google Drive');
+                     return;
+                }
+
+                // Usando um proxy CORS alternativo e mais robusto
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
+
+                try {
+                    const blob = await fetch(proxyUrl).then(res => {
+                        if (!res.ok) throw new Error(`Falha ao baixar imagem: ${res.statusText}`);
+                        return res.blob();
+                    });
+
+                    const image = await this.blobToImage(blob);
+                    
+                    const canvas = document.createElement('canvas');
+                    const detection = await faceapi.detectSingleFace(image);
+
+                    let cropBox;
+                    if (detection) {
+                        cropBox = this.getFaceCropBox(image, detection.box);
+                    } else {
+                        cropBox = this.getCenterCropBox(image);
+                    }
+                    
+                    canvas.width = cropBox.size;
+                    canvas.height = cropBox.size;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(image, cropBox.x, cropBox.y, cropBox.size, cropBox.size, 0, 0, cropBox.size, cropBox.size);
+
+                    const finalBlob = await this.canvasToBlob(canvas);
+                    const finalUrl = URL.createObjectURL(finalBlob);
+                    
+                    this.processedImages.push({ name: this.sanitizeFilename(name) + '.jpg', blob: finalBlob });
+                    this.addResultCard(name, finalUrl, detection ? 'Rosto detectado!' : 'Corte centralizado');
+
+                } catch (error) {
+                    console.error(`Erro ao processar ${name}:`, error);
+                    this.addResultCard(name, null, `Erro: ${error.message}`);
+                }
+            },
+
+            // Adiciona um card de resultado na grade
+            addResultCard(name, imageUrl, message) {
+                const card = document.createElement('div');
+                card.className = 'bg-white p-3 rounded-lg shadow-md flex flex-col items-center text-center';
+
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'w-32 h-32 mb-2 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center';
+                
+                if (imageUrl) {
+                    const img = document.createElement('img');
+                    img.src = imageUrl;
+                    img.className = 'w-full h-full object-cover';
+                    imageContainer.appendChild(img);
+                } else {
+                    imageContainer.innerHTML = `<svg class="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+                }
+
+                const nameEl = document.createElement('p');
+                nameEl.className = 'font-bold text-sm leading-tight';
+                nameEl.textContent = name;
+                
+                const messageEl = document.createElement('p');
+                messageEl.className = `text-xs mt-1 ${imageUrl ? 'text-green-600' : 'text-red-600'}`;
+                messageEl.textContent = message;
+
+                card.appendChild(imageContainer);
+                card.appendChild(nameEl);
+                card.appendChild(messageEl);
+
+                this.resultsGrid.appendChild(card);
+            },
+
+            // Lógica para obter a caixa de corte centralizada no rosto
+            getFaceCropBox(image, box) {
+                const centerX = box.x + box.width / 2;
+                const centerY = box.y + box.height / 2;
+                
+                // O tamanho do corte será 1.5x a altura do rosto, para dar uma margem
+                let size = Math.max(box.width, box.height) * 1.8; 
+                size = Math.min(size, image.width, image.height); // Garante que o corte não seja maior que a imagem
+
+                let x = centerX - size / 2;
+                let y = centerY - size / 2;
+
+                // Ajusta a posição para não sair dos limites da imagem
+                if (x < 0) x = 0;
+                if (y < 0) y = 0;
+                if (x + size > image.width) x = image.width - size;
+                if (y + size > image.height) y = image.height - size;
+
+                return { x, y, size };
+            },
+            
+            // Lógica para obter a caixa de corte no centro da imagem
+            getCenterCropBox(image) {
+                const size = Math.min(image.width, image.height);
+                const x = (image.width - size) / 2;
+                const y = (image.height - size) / 2;
+                return { x, y, size };
+            },
+
+            // Converte URL do Google Drive para link de download direto
+            getGoogleDriveDirectUrl(url) {
+                const regex = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/;
+                const match = url.match(regex);
+                if (match && match[1]) {
+                    return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+                }
+                return null;
+            },
+
+            // Baixa todas as imagens processadas como um arquivo ZIP
+            async downloadAllAsZip() {
+                if (this.processedImages.length === 0) return;
+                
+                const zip = new JSZip();
+                this.processedImages.forEach(img => {
+                    zip.file(img.name, img.blob);
+                });
+
+                this.updateStatus('Gerando arquivo .zip...');
+                const content = await zip.generateAsync({ type: "blob" });
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = "fotos_palestrantes.zip";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                this.updateStatus('Processamento concluído!', false, true);
+            },
+
+            // Funções utilitárias
+            updateStatus(message, isError = false, isSuccess = false) {
+                this.statusText.textContent = message;
+                this.statusText.classList.toggle('text-red-600', isError);
+                this.statusText.classList.toggle('text-green-600', isSuccess);
+                this.statusText.classList.toggle('text-gray-700', !isError && !isSuccess);
+            },
+            updateProgress(percentage) {
+                this.progressBar.style.width = `${percentage}%`;
+            },
+            blobToImage(blob) {
+                return new Promise((resolve, reject) => {
+                    const url = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        URL.revokeObjectURL(url);
+                        resolve(img);
+                    };
+                    img.onerror = (err) => {
+                        URL.revokeObjectURL(url);
+                        reject(err);
+                    };
+                    img.src = url;
+                });
+            },
+            canvasToBlob(canvas) {
+                 return new Promise(resolve => {
+                    canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.9);
+                });
+            },
+            sanitizeFilename(name) {
+                return name.replace(/[^a-z0-9_-\s]/gi, '').replace(/\s+/g, '_').toLowerCase();
+            }
+        };
+
+        // Inicia a aplicação
+        app.init();
+    </script>
+</body>
+</html>
+
